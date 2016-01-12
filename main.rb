@@ -1,6 +1,5 @@
 require 'coinbase/exchange'
 require 'eventmachine'
-require 'chronic_duration'
 require './lib/mailer.rb'
 require './lib/exchange_rates.rb'
 require './lib/orderbook.rb'
@@ -11,18 +10,22 @@ $stdout.sync = true
 
 class Main
   ACCEPTABLE_COMMISSION = ENV.fetch('ACCEPTABLE_COMMISSION', '0.0').to_f
-  NOTIFICATION_INTERVAL = ChronicDuration.parse(ENV.fetch('NOTIFICATION_INTERVAL', '10 minutes'))
 
   def initialize
-    @last_notification_time = Time.now - NOTIFICATION_INTERVAL
     @from_currency = ENV.fetch('@from_currency', 'USD')
     @to_currency = ENV.fetch('@to_currency', 'CAD')
     @from_product_id = "BTC-#{@from_currency}"
     @to_product_id = "BTC-#{@to_currency}"
 
-    @rest_client = Coinbase::Exchange::Client.new(ENV['COINBASE_EXCHANGE_API_KEY'],
-                                                  ENV['COINBASE_EXCHANGE_API_SECRET'],
-                                                  ENV['COINBASE_EXCHANGE_API_PASSWORD'])
+    @from_rest_client = Coinbase::Exchange::Client.new(ENV['FROM_COINBASE_EXCHANGE_API_KEY'],
+                                                       ENV['FROM_COINBASE_EXCHANGE_API_SECRET'],
+                                                       ENV['FROM_COINBASE_EXCHANGE_API_PASSWORD'],
+                                                       product_id: @from_product_id)
+
+    @to_rest_client = Coinbase::Exchange::Client.new(ENV['TO_COINBASE_EXCHANGE_API_KEY'],
+                                                     ENV['TO_COINBASE_EXCHANGE_API_SECRET'],
+                                                     ENV['TO_COINBASE_EXCHANGE_API_PASSWORD'],
+                                                     product_id: @to_product_id)
 
     @from_websocket = Coinbase::Exchange::Websocket.new(product_id: @from_product_id,
                                                         keepalive: true)
@@ -30,66 +33,129 @@ class Main
     @to_websocket = Coinbase::Exchange::Websocket.new(product_id: @to_product_id,
                                                       keepalive: true)
 
-    @from_book = LiveOrderbook.new(@from_product_id, @rest_client, @from_websocket)
-    @to_book = LiveOrderbook.new(@to_product_id, @rest_client, @to_websocket)
+    @from_book = LiveOrderbook.new(@from_product_id, @from_rest_client, @from_websocket)
+    @to_book = LiveOrderbook.new(@to_product_id, @to_rest_client, @to_websocket)
 
-    @current_spread = 0
-  end
-
-  def evaluate_and_notify
-    return unless @to_book.ready? && @from_book.ready?
-
-    to_price = Money.from_amount(@to_book.bids.first[Orderbook::PRICE], @to_currency)
-    from_price = Money.from_amount(@from_book.asks.first[Orderbook::PRICE], @from_currency)
-
-    spread = (((to_price / from_price) - 1) * 100)
-
-    if spread == @current_spread
-      return
-    else
-      @current_spread = spread
-    end
-
-    message = <<-END
-Ask in #{@from_currency}: #{from_price.format}
-Bid in #{@to_currency}: #{to_price.format} (#{@from_currency} #{to_price.exchange_to(@from_currency).format})
-
-Spread: #{'%0.2f' % spread}%
-END
-
-    puts message
-
-    if Time.now >= (@last_notification_time + NOTIFICATION_INTERVAL) && to_price >= from_price * (1 - ACCEPTABLE_COMMISSION)
-      mail         = Mail.new
-      mail.from    = ENV.fetch('NOTIFICATION_SENDER', "noreply@#{ENV.fetch('NOTIFICATION_SENDER_DOMAIN')}")
-      mail.to      = ENV.fetch('NOTIFICATION_RECIPIENT')
-      mail.subject = "Good time to transfer #{@from_currency} to #{@to_currency}"
-      mail.text_part do
-        content_type 'text/plain; charset=UTF-8'
-        body message
-      end
-      mail.deliver!
-      puts "Sending mail at #{Time.now}"
-      @last_notification_time = Time.now
-    end
+    @current_limit_order = nil
+    @pending_limit_order = false
   end
 
   def start_em
-    @from_book.on_change do |_|
-      evaluate_and_notify
-    end
-
-    @to_book.on_change do |_|
-      evaluate_and_notify
-    end
-
     EM.run do
+      @from_book.on_ready do
+        @to_book.on_ready(&method(:reevaluate_order))
+      end
+
+      @from_book.on_message(&method(:reevaluate_order))
+      @to_book.on_message(&method(:reevaluate_order))
+      @to_book.on_match(&method(:process_match))
+
+      @to_rest_client.accounts do |accounts|
+        @to_balance =
+          Money.from_amount(
+            accounts.select{|acc| acc.currency == "BTC" }.first.available,
+            "BTC"
+          )
+
+        @to_book.start!
+      end
+
       @from_book.start!
-      @to_book.start!
-      EM.error_handler { |e|
-        puts "Websocket Error: #{e.message}"
-      }
     end
+  end
+
+  def process_match(msg)
+    return if !@current_limit_order
+
+    if msg['maker_order_id'] == @current_limit_order[Orderbook::ORDER_ID]
+      size = BigDecimal.new(msg['size'])
+      order_id = msg['maker_order_id']
+
+      # We got matched on the to side, do a market order on the from side
+      puts "Got a match on #{order_id} for #{size}"
+      @current_limit_order[Orderbook::SIZE] -= size
+
+      @from_rest_client.bid(size, nil, type: 'market') do |resp|
+
+        if @current_limit_order[Orderbook::SIZE] == 0
+          exit 0
+        end
+      end
+    end
+  end
+
+  def reevaluate_order(_)
+    return if @pending_limit_order || !@to_book.ready? || !@from_book.ready?
+
+    # Move the limit order on the 'to' side to the correct position
+    from_price     = Money.from_amount(@from_book.asks.first[Orderbook::PRICE], @from_currency)
+    worst_to_price = (from_price.exchange_to(@to_currency) * (1 - ACCEPTABLE_COMMISSION)).to_d
+
+    best_ask = @to_book.asks.first
+    target_best_ask = best_ask[Orderbook::PRICE] - BigDecimal.new('0.01')
+    target_price = [worst_to_price, target_best_ask].max
+
+    # If there is no order yet, place one
+    if !@current_limit_order
+      size = (@to_balance * BigDecimal.new('0.99')).to_d
+      place_limit_order(target_price, size)
+      return
+    end
+
+    # If we are already the best ask and the price is better than worst_to_price, do nothing
+    if best_ask? && best_ask[Orderbook::PRICE] > worst_to_price
+      return
+    end
+
+    # If the target_price hasn't changed, do nothing
+    if @current_limit_order[Orderbook::PRICE] == target_price
+      return
+    end
+
+    # Otherwise, we need to cancel the current order and place a new one in the correct place
+    move_limit_order(target_price)
+  end
+
+private
+
+  def place_limit_order(price, size)
+    puts "Placing limit order for #{size} @ #{price}"
+
+    @current_limit_order = nil
+    @pending_limit_order = true
+    @to_rest_client.ask(size, price, post_only: true) do |order|
+      @pending_limit_order = false
+
+      # Order accepted
+      if order.id
+        @current_limit_order = [price, size, order.id]
+      end
+    end
+  end
+
+  def move_limit_order(price)
+    puts "Moving limit order to #{price}"
+
+    order_id = @current_limit_order[Orderbook::ORDER_ID]
+    size     = @current_limit_order[Orderbook::SIZE]
+    @pending_limit_order = true
+    @to_rest_client.cancel(order_id) do |resp|
+      if resp.message != 'OK'
+        # There was an error canceling the order; we probably got filled
+        # Wait until the match is processed and we exit
+        puts "Error canceling order #{order_id} with #{resp.message}"
+        exit 1
+      end
+
+      # Successfully canceled, place the new order
+      place_limit_order(price, size)
+    end
+  end
+
+  def best_ask?
+    best_ask = @to_book.asks.first
+    @current_limit_order &&
+      @current_limit_order[Orderbook::ORDER_ID] == best_ask[Orderbook::ORDER_ID]
   end
 end
 

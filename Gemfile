@@ -6,7 +6,6 @@ gem 'eventmachine', '~> 1.0', '>= 1.0.8'
 gem 'coinbase-exchange', '~> 0.1.2'
 gem 'money-open-exchange-rates', '~> 0.3'
 gem 'rake', '~> 10.4'
-gem 'chronic_duration', '~> 0.10'
 gem 'activesupport', '~> 4.2', '>= 4.2.5'
 
 group :development, :test do

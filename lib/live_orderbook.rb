@@ -14,16 +14,42 @@ class LiveOrderbook
 
     @queue = Queue.new
 
-    @on_change_cb = lambda { |msg| nil }
+    @on_message_cb =
+      @on_open_cb =
+      @on_done_cb =
+      @on_match_cb =
+      @on_change_cb = lambda { |msg| nil }
+
+    @on_ready_cb = lambda { nil }
   end
 
   def start!
     @websocket.start!
-    refresh!
+    EM.add_timer 5, self.method(:refresh!)
+  end
+
+  def on_ready(&block)
+    @on_ready_cb = block
+  end
+
+  def on_message(&block)
+    @on_message_cb = block
+  end
+
+  def on_open(&block)
+    @on_open_cb = block
+  end
+
+  def on_done(&block)
+    @on_done_cb = block
   end
 
   def on_change(&block)
     @on_change_cb = block
+  end
+
+  def on_match(&block)
+    @on_match_cb = block
   end
 
   def process_message(msg)
@@ -35,14 +61,20 @@ class LiveOrderbook
       case msg['type']
       when "open"
         @orderbook.open(msg)
+        @on_open_cb.call(msg)
       when "done"
         @orderbook.done(msg)
+        @on_done_cb.call(msg)
       when "change"
         @orderbook.change(msg)
+        @on_change_cb.call(msg)
+      when "match"
+        @on_match_cb.call(msg)
       end
 
       @sequence = msg['sequence'].to_i
-      @on_change_cb.call(msg)
+
+      @on_message_cb.call(msg)
     end
   end
 
@@ -57,6 +89,8 @@ class LiveOrderbook
       while !@queue.empty?
         process_message(@queue.pop)
       end
+
+      @on_ready_cb.call
     end
   end
 
