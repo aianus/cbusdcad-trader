@@ -2,8 +2,8 @@ require 'coinbase/exchange'
 require 'eventmachine'
 require './lib/mailer.rb'
 require './lib/exchange_rates.rb'
-require './lib/orderbook.rb'
-require './lib/live_orderbook.rb'
+
+include Coinbase::Exchange
 
 I18n.enforce_available_locales = false
 $stdout.sync = true
@@ -46,8 +46,14 @@ class Main
         @to_book.on_ready(&method(:reevaluate_order))
       end
 
-      @from_book.on_message(&method(:reevaluate_order))
-      @to_book.on_message(&method(:reevaluate_order))
+      @from_book.on_message do |_|
+        self.reevaluate_order
+      end
+
+      @to_book.on_message do |_|
+        self.reevaluate_order
+      end
+
       @to_book.on_match(&method(:process_match))
 
       @to_rest_client.accounts do |accounts|
@@ -83,7 +89,7 @@ class Main
     end
   end
 
-  def reevaluate_order(_)
+  def reevaluate_order
     return if @pending_limit_order || !@to_book.ready? || !@from_book.ready?
 
     # Move the limit order on the 'to' side to the correct position
@@ -138,7 +144,7 @@ private
         # There was an error canceling the order; we probably got filled
         # Wait until the match is processed and we exit
         puts "Error canceling order #{order_id} with #{resp.message}"
-        exit 1
+        return
       end
 
       # Successfully canceled, place the new order

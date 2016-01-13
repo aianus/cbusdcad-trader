@@ -1,3 +1,13 @@
+GIT
+  remote: https://github.com/aianus/coinbase-exchange-ruby.git
+  revision: 39f87c7ec6213f8d96efb8f1e82db57c91d6527a
+  branch: aianus/add_live_orderbook
+  specs:
+    coinbase-exchange (0.1.2)
+      bigdecimal
+      em-http-request
+      faye-websocket
+
 GEM
   remote: https://rubygems.org/
   specs:
@@ -11,10 +21,6 @@ GEM
     bigdecimal (1.2.7)
     byebug (8.2.1)
     coderay (1.1.0)
-    coinbase-exchange (0.1.2)
-      bigdecimal
-      em-http-request
-      faye-websocket
     cookiejar (0.3.0)
     crack (0.4.3)
       safe_yaml (~> 1.0.0)
@@ -94,7 +100,7 @@ PLATFORMS
 
 DEPENDENCIES
   activesupport (~> 4.2, >= 4.2.5)
-  coinbase-exchange (~> 0.1.2)
+  coinbase-exchange (~> 0.1.2)!
   eventmachine (~> 1.0, >= 1.0.8)
   mail (~> 2.6)
   money-open-exchange-rates (~> 0.3)

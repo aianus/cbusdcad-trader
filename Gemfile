@@ -3,7 +3,7 @@ ruby '2.2.2'
 
 gem 'mail', '~> 2.6'
 gem 'eventmachine', '~> 1.0', '>= 1.0.8'
-gem 'coinbase-exchange', '~> 0.1.2'
+gem 'coinbase-exchange', '~> 0.1.2', git: 'https://github.com/aianus/coinbase-exchange-ruby.git', branch: 'aianus/add_live_orderbook'
 gem 'money-open-exchange-rates', '~> 0.3'
 gem 'rake', '~> 10.4'
 gem 'activesupport', '~> 4.2', '>= 4.2.5'
