@@ -109,18 +109,25 @@ class Main
       return
     end
 
+    current_price = @current_limit_order[Orderbook::PRICE]
+
     # If we are already the best ask and the price is better than worst_to_price, do nothing
-    if best_ask? && best_ask[Orderbook::PRICE] > worst_to_price
+    if best_ask? && current_price > worst_to_price
       return
     end
 
-    # If the target_price hasn't changed, do nothing
-    if @current_limit_order[Orderbook::PRICE] == target_price
+    # If we're not the best ask and the target hasn't moved much, leave it alone
+    if !best_ask? &&
+      target_price != target_best_ask &&
+      (current_price - target_price).abs < BigDecimal.new('0.10')
+      return
+    end
+
+    if target_price == current_price
       return
     end
 
     # Otherwise, we need to cancel the current order and place a new one in the correct place
-    puts "Worst price: #{worst_to_price}, Target best ask: #{target_best_ask}, target_price: #{target_price}"
     puts "Moving limit order to #{target_price}"
     move_limit_order(target_price)
   end
@@ -160,7 +167,7 @@ private
   def best_ask?
     best_ask = @to_book.asks.first
     @current_limit_order &&
-      @current_limit_order[Orderbook::ORDER_ID] == best_ask[Orderbook::ORDER_ID]
+      @current_limit_order[Orderbook::PRICE] == best_ask[Orderbook::PRICE]
   end
 end
 
