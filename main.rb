@@ -103,6 +103,7 @@ class Main
     # If there is no order yet, place one
     if !@current_limit_order
       size = (@to_balance * BigDecimal.new('0.99')).to_d
+      puts "Placing limit order for #{size} @ #{target_price}"
       place_limit_order(target_price, size)
       return
     end
@@ -113,14 +114,14 @@ class Main
     end
 
     # Otherwise, we need to cancel the current order and place a new one in the correct place
+    puts "Worst price: #{worst_to_price}, Target best ask: #{target_best_ask}, target_price: #{target_price}"
+    puts "Moving limit order to #{target_price}"
     move_limit_order(target_price)
   end
 
 private
 
   def place_limit_order(price, size)
-    puts "Placing limit order for #{size} @ #{price}"
-
     @current_limit_order = nil
     @pending_limit_order = true
     @to_rest_client.ask(size, price, post_only: true) do |order|
@@ -134,8 +135,6 @@ private
   end
 
   def move_limit_order(price)
-    puts "Moving limit order to #{price}"
-
     order_id = @current_limit_order[Orderbook::ORDER_ID]
     size     = @current_limit_order[Orderbook::SIZE]
     @pending_limit_order = true
