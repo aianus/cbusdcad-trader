@@ -82,6 +82,7 @@ class Main
       @current_limit_order[Orderbook::SIZE] -= size
 
       @from_rest_client.bid(size, nil, type: 'market') do |resp|
+
         if @current_limit_order[Orderbook::SIZE] == 0
           exit 0
         end
@@ -96,8 +97,8 @@ class Main
     from_price     = Money.from_amount(@from_book.asks.first[Orderbook::PRICE], @from_currency)
     worst_to_price = (from_price.exchange_to(@to_currency) * (1 - ACCEPTABLE_COMMISSION)).to_d
 
-    other_best_ask = best_ask? ? @to_book.asks[1] : @to_book.asks.first
-    target_best_ask = other_best_ask[Orderbook::PRICE] - BigDecimal.new('0.01')
+    best_ask = @to_book.asks.first
+    target_best_ask = best_ask[Orderbook::PRICE] - BigDecimal.new('0.01')
     target_price = [worst_to_price, target_best_ask].max
 
     # If there is no order yet, place one
@@ -105,6 +106,11 @@ class Main
       size = (@to_balance * BigDecimal.new('0.99')).to_d
       puts "Placing limit order for #{size} @ #{target_price}"
       place_limit_order(target_price, size)
+      return
+    end
+
+    # If we are already the best ask and the price is better than worst_to_price, do nothing
+    if best_ask? && best_ask[Orderbook::PRICE] > worst_to_price
       return
     end
 
