@@ -81,10 +81,13 @@ class Main
       puts "Got a match on #{order_id} for #{size}"
       @current_limit_order[Orderbook::SIZE] -= size
 
-      @from_rest_client.bid(size, nil, type: 'market') do |resp|
-
-        if @current_limit_order[Orderbook::SIZE] == 0
-          exit 0
+      if ENV['SELL_ONLY'] && @current_limit_order[Orderbook::SIZE] == 0
+        exit 0
+      else
+        @from_rest_client.bid(size, nil, type: 'market') do |resp|
+          if @current_limit_order[Orderbook::SIZE] == 0
+            exit 0
+          end
         end
       end
     end
