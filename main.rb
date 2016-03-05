@@ -162,8 +162,10 @@ private
         return
       end
 
-      # Successfully canceled, place the new order
-      place_limit_order(price, size)
+      # Successfully canceled, place the new order after waiting 1s for settlement
+      EventMachine::Timer.new(1) do
+        place_limit_order(price, size)
+      end
     end
   end
 
