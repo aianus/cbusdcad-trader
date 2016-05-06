@@ -106,7 +106,7 @@ class Main
 
     # If there is no order yet, place one
     if !@current_limit_order
-      size = (@to_balance * BigDecimal.new('0.99')).to_d
+      size = @to_balance.to_d
       puts "Placing limit order for #{size} @ #{target_price}"
       place_limit_order(target_price, size)
       return
