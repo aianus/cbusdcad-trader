@@ -1,6 +1,5 @@
 require 'coinbase/exchange'
 require 'eventmachine'
-require './lib/mailer.rb'
 require './lib/exchange_rates.rb'
 
 include Coinbase::Exchange
